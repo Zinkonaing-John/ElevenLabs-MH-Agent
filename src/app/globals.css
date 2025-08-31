@@ -70,3 +70,27 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+/* Speaking Wave Animation */
+@keyframes speaking-wave {
+  0%, 100% {
+    transform: scaleY(0.3);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+/* Listening Wave Animation */
+@keyframes listening-wave {
+  0%, 100% {
+    transform: scaleY(0.5);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scaleY(1.2);
+    opacity: 1;
+  }
+}
