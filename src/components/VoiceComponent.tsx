@@ -18,8 +18,8 @@ import {
   Loader2,
   Settings,
   HelpCircle,
-  RefreshCw,
   Phone,
+  RefreshCw,
 } from "lucide-react";
 
 interface StatusConfig {
@@ -44,16 +44,33 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
   const [lastError, setLastError] = useState("");
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState("English");
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [audioVolume, setAudioVolume] = useState(1);
+  const [enableSoundEffects, setEnableSoundEffects] = useState(true);
+  const [enableHapticFeedback, setEnableHapticFeedback] = useState(true);
+
+  // Check if ElevenLabs is properly configured
+  const isElevenLabsConfigured = () => {
+    const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
+    return agentId && agentId !== "xxx";
+  };
 
   const conversation = useConversation({
     onConnect: () => {
       console.log("Connected to ElevenLabs");
       setErrorMessage("");
       setIsLoading(false);
+      setIsRetrying(false);
+      setRetryCount(0);
+      setSessionStartTime(new Date());
     },
     onDisconnect: () => {
       console.log("Disconnected from ElevenLabs");
       setIsLoading(false);
+      setSessionStartTime(null);
     },
     onMessage: (message) => {
       console.log("Received message:", message);
@@ -138,16 +155,59 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
     }
   }, [status]);
 
+  const playSound = (type: 'start' | 'end' | 'error' | 'mute' | 'unmute') => {
+    if (!enableSoundEffects) return;
+    
+    // Create audio context for sound effects
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    // Different frequencies for different sounds
+    const frequencies = {
+      start: 440, // A4
+      end: 220,   // A3
+      error: 150, // Low frequency
+      mute: 330,  // E4
+      unmute: 550 // C#5
+    };
+    
+    oscillator.frequency.setValueAtTime(frequencies[type], audioContext.currentTime);
+    gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.1 * audioVolume, audioContext.currentTime + 0.01);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.3);
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.3);
+  };
+
+  const triggerHaptic = (type: 'light' | 'medium' | 'heavy' = 'light') => {
+    if (!enableHapticFeedback || !navigator.vibrate) return;
+    
+    const patterns = {
+      light: [10],
+      medium: [20],
+      heavy: [50, 50, 50]
+    };
+    
+    navigator.vibrate(patterns[type]);
+  };
+
   const handleStartConversation = async () => {
     try {
       setIsLoading(true);
       setErrorMessage("");
+      playSound('start');
+      triggerHaptic('light');
 
       // Check if agent ID is configured
       const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
       if (!agentId || agentId === "xxx") {
         throw new Error(
-          "ElevenLabs Agent ID not configured. Please check your .env.local file."
+          "ElevenLabs Agent ID not configured. Please:\n1. Go to https://elevenlabs.io/app/conversational-ai\n2. Create or select an agent\n3. Copy the Agent ID\n4. Replace 'xxx' in your .env.local file with the actual Agent ID\n5. Restart your development server"
         );
       }
 
@@ -165,6 +225,8 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
         error instanceof Error ? error.message : "Failed to start conversation";
       setErrorMessage(errorMsg);
       setIsLoading(false);
+      playSound('error');
+      triggerHaptic('heavy');
       console.error("Error starting conversation:", error);
     }
   };
@@ -172,12 +234,16 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
   const handleEndConversation = async () => {
     try {
       setIsLoading(true);
+      playSound('end');
+      triggerHaptic('medium');
       await conversation.endSession();
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : "Failed to end conversation";
       setErrorMessage(errorMsg);
       setIsLoading(false);
+      playSound('error');
+      triggerHaptic('heavy');
       console.error("Error ending conversation:", error);
     }
   };
@@ -186,10 +252,14 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
     try {
       await conversation.setVolume({ volume: isMuted ? 1 : 0 });
       setIsMuted(!isMuted);
+      playSound(isMuted ? 'unmute' : 'mute');
+      triggerHaptic('light');
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : "Failed to change volume";
       setErrorMessage(errorMsg);
+      playSound('error');
+      triggerHaptic('heavy');
       console.error("Error changing volume:", error);
     }
   };
@@ -207,14 +277,59 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
   const retryConnection = async () => {
     if (status === "connected") return;
 
+    setIsRetrying(true);
+    setRetryCount(prev => prev + 1);
     setErrorMessage("");
     setConnectionAttempts(0);
-    await handleStartConversation();
+    
+    // Add exponential backoff for retries
+    const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
+    setTimeout(async () => {
+      await handleStartConversation();
+      setIsRetrying(false);
+    }, delay);
   };
 
   const handleLanguageSelect = (language: string) => {
     setSelectedLanguage(language);
   };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Prevent shortcuts when typing in input fields
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      switch (event.key) {
+        case ' ':
+          event.preventDefault();
+          if (status !== "connected" && hasPermission && !isLoading && !isRetrying) {
+            handleStartConversation();
+          }
+          break;
+        case 'Escape':
+          if (status === "connected") {
+            handleEndConversation();
+          }
+          break;
+        case 'm':
+        case 'M':
+          if (status === "connected") {
+            toggleMute();
+          }
+          break;
+        case 'h':
+        case 'H':
+          setShowHelp(!showHelp);
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [status, hasPermission, isLoading, isRetrying, showHelp]);
 
   return (
     <div className="w-full space-y-6">
@@ -257,12 +372,28 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
               <Button
                 variant="outline"
                 size="icon"
+                onClick={() => setShowSettings(!showSettings)}
+                className={`${
+                  isDarkMode
+                    ? "hover:bg-gray-800 hover:border-gray-600 text-gray-400 border-gray-700"
+                    : "hover:bg-gray-100 hover:border-gray-400 text-gray-600 border-gray-300"
+                }`}
+                aria-label={showSettings ? "Hide settings" : "Show settings"}
+                title={showSettings ? "Hide settings" : "Show settings"}
+              >
+                <Settings className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
                 onClick={() => setShowHelp(!showHelp)}
                 className={`${
                   isDarkMode
                     ? "hover:bg-gray-800 hover:border-gray-600 text-gray-400 border-gray-700"
                     : "hover:bg-gray-100 hover:border-gray-400 text-gray-600 border-gray-300"
                 }`}
+                aria-label={showHelp ? "Hide help" : "Show help"}
+                title={showHelp ? "Hide help" : "Show help"}
               >
                 <HelpCircle className="h-4 w-4" />
               </Button>
@@ -276,6 +407,8 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
                     ? "hover:bg-gray-800 hover:border-gray-600 text-gray-400 border-gray-700"
                     : "hover:bg-gray-100 hover:border-gray-400 text-gray-600 border-gray-300"
                 }`}
+                aria-label={isMuted ? "Unmute audio" : "Mute audio"}
+                title={isMuted ? "Unmute audio" : "Mute audio"}
               >
                 {isMuted ? (
                   <VolumeX className="h-4 w-4" />
@@ -295,18 +428,30 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
                 isDarkMode ? "text-gray-300" : "text-gray-700"
               }`}
             >
-              Proviced Language : Just Communicate with your preferred language
+              Supported Languages: Communicate in your preferred language
             </h3>
-            <div className="flex gap-3 flex-wrap">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3">
               {/* English */}
               <button
+                onClick={() => handleLanguageSelect("English")}
                 className={`p-2 rounded-lg border-2 transition-all duration-200 hover:scale-105 ${
-                  isDarkMode
+                  selectedLanguage === "English"
+                    ? isDarkMode
+                      ? "bg-blue-600/20 border-blue-500"
+                      : "bg-blue-100/50 border-blue-500"
+                    : isDarkMode
                     ? "bg-gray-800/50 border-gray-600 hover:border-blue-500"
                     : "bg-gray-100/50 border-gray-300 hover:border-blue-500"
                 }`}
+                aria-label="Select English language"
               >
-                <div className="text-2xl">🇺🇸</div>
+                <div className="w-8 h-5 mx-auto">
+                  <img 
+                    src="/flags/uk.png" 
+                    alt="UK Flag" 
+                    className="w-full h-full object-cover rounded-sm"
+                  />
+                </div>
                 <div
                   className={`text-xs mt-1 ${
                     isDarkMode ? "text-gray-300" : "text-gray-700"
@@ -318,13 +463,25 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
 
               {/* Korean */}
               <button
+                onClick={() => handleLanguageSelect("Korean")}
                 className={`p-2 rounded-lg border-2 transition-all duration-200 hover:scale-105 ${
-                  isDarkMode
+                  selectedLanguage === "Korean"
+                    ? isDarkMode
+                      ? "bg-blue-600/20 border-blue-500"
+                      : "bg-blue-100/50 border-blue-500"
+                    : isDarkMode
                     ? "bg-gray-800/50 border-gray-600 hover:border-blue-500"
                     : "bg-gray-100/50 border-gray-300 hover:border-blue-500"
                 }`}
+                aria-label="Select Korean language"
               >
-                <div className="text-2xl">🇰🇷</div>
+                <div className="w-8 h-5 mx-auto">
+                  <img 
+                    src="/flags/kr.png" 
+                    alt="Korean Flag" 
+                    className="w-full h-full object-cover rounded-sm"
+                  />
+                </div>
                 <div
                   className={`text-xs mt-1 ${
                     isDarkMode ? "text-gray-300" : "text-gray-700"
@@ -336,13 +493,25 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
 
               {/* Chinese */}
               <button
+                onClick={() => handleLanguageSelect("Chinese")}
                 className={`p-2 rounded-lg border-2 transition-all duration-200 hover:scale-105 ${
-                  isDarkMode
+                  selectedLanguage === "Chinese"
+                    ? isDarkMode
+                      ? "bg-blue-600/20 border-blue-500"
+                      : "bg-blue-100/50 border-blue-500"
+                    : isDarkMode
                     ? "bg-gray-800/50 border-gray-600 hover:border-blue-500"
                     : "bg-gray-100/50 border-gray-300 hover:border-blue-500"
                 }`}
+                aria-label="Select Chinese language"
               >
-                <div className="text-2xl">🇨🇳</div>
+                <div className="w-8 h-5 mx-auto">
+                  <img 
+                    src="/flags/cn.png" 
+                    alt="Chinese Flag" 
+                    className="w-full h-full object-cover rounded-sm"
+                  />
+                </div>
                 <div
                   className={`text-xs mt-1 ${
                     isDarkMode ? "text-gray-300" : "text-gray-700"
@@ -354,13 +523,25 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
 
               {/* Japanese */}
               <button
+                onClick={() => handleLanguageSelect("Japanese")}
                 className={`p-2 rounded-lg border-2 transition-all duration-200 hover:scale-105 ${
-                  isDarkMode
+                  selectedLanguage === "Japanese"
+                    ? isDarkMode
+                      ? "bg-blue-600/20 border-blue-500"
+                      : "bg-blue-100/50 border-blue-500"
+                    : isDarkMode
                     ? "bg-gray-800/50 border-gray-600 hover:border-blue-500"
                     : "bg-gray-100/50 border-gray-300 hover:border-blue-500"
                 }`}
+                aria-label="Select Japanese language"
               >
-                <div className="text-2xl">🇯🇵</div>
+                <div className="w-8 h-5 mx-auto">
+                  <img 
+                    src="/flags/jp.png" 
+                    alt="Japanese Flag" 
+                    className="w-full h-full object-cover rounded-sm"
+                  />
+                </div>
                 <div
                   className={`text-xs mt-1 ${
                     isDarkMode ? "text-gray-300" : "text-gray-700"
@@ -372,13 +553,25 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
 
               {/* Vietnamese */}
               <button
+                onClick={() => handleLanguageSelect("Vietnamese")}
                 className={`p-2 rounded-lg border-2 transition-all duration-200 hover:scale-105 ${
-                  isDarkMode
+                  selectedLanguage === "Vietnamese"
+                    ? isDarkMode
+                      ? "bg-blue-600/20 border-blue-500"
+                      : "bg-blue-100/50 border-blue-500"
+                    : isDarkMode
                     ? "bg-gray-800/50 border-gray-600 hover:border-blue-500"
                     : "bg-gray-100/50 border-gray-300 hover:border-blue-500"
                 }`}
+                aria-label="Select Vietnamese language"
               >
-                <div className="text-2xl">🇻🇳</div>
+                <div className="w-8 h-5 mx-auto">
+                  <img 
+                    src="/flags/vn.png" 
+                    alt="Vietnamese Flag" 
+                    className="w-full h-full object-cover rounded-sm"
+                  />
+                </div>
                 <div
                   className={`text-xs mt-1 ${
                     isDarkMode ? "text-gray-300" : "text-gray-700"
@@ -390,8 +583,29 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
             </div>
           </div>
 
+          {/* Configuration Status */}
+          {!isElevenLabsConfigured() && (
+            <div className="p-4 bg-yellow-900/20 rounded-lg border border-yellow-700/30 mb-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-yellow-400 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-yellow-400 font-medium mb-2">
+                    ElevenLabs Configuration Required
+                  </p>
+                  <div className="text-yellow-300 text-sm space-y-1">
+                    <p>1. Go to <a href="https://elevenlabs.io/app/conversational-ai" target="_blank" rel="noopener noreferrer" className="underline hover:text-yellow-200">ElevenLabs Console</a></p>
+                    <p>2. Create or select an agent</p>
+                    <p>3. Copy the Agent ID</p>
+                    <p>4. Replace 'xxx' in your .env.local file</p>
+                    <p>5. Restart your development server</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Connection Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
             <div
               className={`flex items-center gap-2 p-3 rounded-lg border ${
                 isDarkMode
@@ -480,16 +694,27 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
 
             {/* Connection Progress */}
             {status === "connecting" && (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="flex justify-between text-sm text-gray-400">
                   <span>Connecting to AI...</span>
                   <span>Please wait</span>
                 </div>
                 <div className="w-full bg-gray-700 rounded-full h-2">
                   <div
-                    className="bg-blue-500 h-2 rounded-full animate-pulse"
+                    className="bg-gradient-to-r from-blue-500 to-cyan-500 h-2 rounded-full animate-pulse"
                     style={{ width: "60%" }}
                   ></div>
+                </div>
+                <div className="flex justify-center">
+                  <div className="flex space-x-1">
+                    {[...Array(3)].map((_, i) => (
+                      <div
+                        key={i}
+                        className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"
+                        style={{ animationDelay: `${i * 0.1}s` }}
+                      ></div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -527,7 +752,8 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
                 variant="destructive"
                 onClick={handleEndConversation}
                 disabled={isLoading}
-                className="w-full max-w-xs h-14 text-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 bg-red-600 hover:bg-red-700 border-0"
+                className="w-full max-w-xs h-14 text-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 bg-red-600 hover:bg-red-700 border-0 hover:scale-105 active:scale-95"
+                aria-label="End conversation"
               >
                 {isLoading ? (
                   <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -535,19 +761,22 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
                   <Phone className="mr-2 h-5 w-5" />
                 )}
                 End Conversation
+                <span className="ml-2 text-xs opacity-70">(Esc)</span>
               </Button>
             ) : (
               <Button
                 onClick={handleStartConversation}
-                disabled={!hasPermission || isLoading}
-                className="w-full max-w-xs h-14 text-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-700 hover:to-cyan-600 disabled:opacity-50 disabled:cursor-not-allowed border-0"
+                disabled={!hasPermission || isLoading || isRetrying || !isElevenLabsConfigured()}
+                className="w-full max-w-xs h-14 text-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-700 hover:to-cyan-600 disabled:opacity-50 disabled:cursor-not-allowed border-0 hover:scale-105 active:scale-95"
+                aria-label="Start conversation"
               >
-                {isLoading ? (
+                {isLoading || isRetrying ? (
                   <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                 ) : (
                   <Mic className="mr-2 h-5 w-5" />
                 )}
-                Start Conversation
+                {isRetrying ? "Retrying..." : "Start Conversation"}
+                <span className="ml-2 text-xs opacity-70">(Space)</span>
               </Button>
             )}
           </div>
@@ -680,6 +909,144 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
         </CardContent>
       </Card>
 
+
+      {/* Settings Panel */}
+      {showSettings && (
+        <Card
+          className={`backdrop-blur-sm ${
+            isDarkMode
+              ? "bg-gray-900/50 border-gray-700"
+              : "bg-white/80 border-gray-300 shadow-lg"
+          }`}
+        >
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-blue-400">
+              <Settings className="h-5 w-5" />
+              Settings
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Audio Volume */}
+            <div className="space-y-3">
+              <label
+                className={`text-sm font-medium ${
+                  isDarkMode ? "text-gray-300" : "text-gray-700"
+                }`}
+              >
+                Audio Volume
+              </label>
+              <div className="flex items-center gap-3">
+                <VolumeX className="h-4 w-4 text-gray-400" />
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={audioVolume}
+                  onChange={(e) => setAudioVolume(parseFloat(e.target.value))}
+                  className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                />
+                <Volume2 className="h-4 w-4 text-gray-400" />
+                <span
+                  className={`text-sm w-12 text-right ${
+                    isDarkMode ? "text-gray-300" : "text-gray-700"
+                  }`}
+                >
+                  {Math.round(audioVolume * 100)}%
+                </span>
+              </div>
+            </div>
+
+            {/* Sound Effects Toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <label
+                  className={`text-sm font-medium ${
+                    isDarkMode ? "text-gray-300" : "text-gray-700"
+                  }`}
+                >
+                  Sound Effects
+                </label>
+                <p
+                  className={`text-xs ${
+                    isDarkMode ? "text-gray-400" : "text-gray-500"
+                  }`}
+                >
+                  Play sounds for interactions
+                </p>
+              </div>
+              <Button
+                variant={enableSoundEffects ? "default" : "outline"}
+                size="sm"
+                onClick={() => setEnableSoundEffects(!enableSoundEffects)}
+                className={enableSoundEffects ? "bg-blue-600" : ""}
+              >
+                {enableSoundEffects ? "On" : "Off"}
+              </Button>
+            </div>
+
+            {/* Haptic Feedback Toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <label
+                  className={`text-sm font-medium ${
+                    isDarkMode ? "text-gray-300" : "text-gray-700"
+                  }`}
+                >
+                  Haptic Feedback
+                </label>
+                <p
+                  className={`text-xs ${
+                    isDarkMode ? "text-gray-400" : "text-gray-500"
+                  }`}
+                >
+                  Vibration for mobile devices
+                </p>
+              </div>
+              <Button
+                variant={enableHapticFeedback ? "default" : "outline"}
+                size="sm"
+                onClick={() => setEnableHapticFeedback(!enableHapticFeedback)}
+                className={enableHapticFeedback ? "bg-blue-600" : ""}
+              >
+                {enableHapticFeedback ? "On" : "Off"}
+              </Button>
+            </div>
+
+            {/* Session Info */}
+            {sessionStartTime && (
+              <div
+                className={`p-3 rounded-lg ${
+                  isDarkMode ? "bg-gray-800/50" : "bg-gray-100/50"
+                }`}
+              >
+                <h4
+                  className={`text-sm font-medium mb-2 ${
+                    isDarkMode ? "text-gray-300" : "text-gray-700"
+                  }`}
+                >
+                  Session Information
+                </h4>
+                <p
+                  className={`text-xs ${
+                    isDarkMode ? "text-gray-400" : "text-gray-500"
+                  }`}
+                >
+                  Started: {sessionStartTime.toLocaleTimeString()}
+                </p>
+                <p
+                  className={`text-xs ${
+                    isDarkMode ? "text-gray-400" : "text-gray-500"
+                  }`}
+                >
+                  Duration: {Math.floor((Date.now() - sessionStartTime.getTime()) / 1000 / 60)} minutes
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Help Section */}
       {showHelp && (
         <Card
@@ -779,6 +1146,25 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
                 }`}
               >
                 <Settings className="h-4 w-4 text-blue-400" />
+                <div className="flex-1">
+                  <p className={isDarkMode ? "text-gray-300" : "text-gray-700"}>
+                    <strong>Keyboard Shortcuts:</strong>
+                  </p>
+                  <div className="mt-2 space-y-1 text-xs">
+                    <p className={isDarkMode ? "text-gray-400" : "text-gray-600"}>
+                      <kbd className="px-1 py-0.5 bg-gray-600 text-white rounded text-xs">Space</kbd> - Start conversation
+                    </p>
+                    <p className={isDarkMode ? "text-gray-400" : "text-gray-600"}>
+                      <kbd className="px-1 py-0.5 bg-gray-600 text-white rounded text-xs">Esc</kbd> - End conversation
+                    </p>
+                    <p className={isDarkMode ? "text-gray-400" : "text-gray-600"}>
+                      <kbd className="px-1 py-0.5 bg-gray-600 text-white rounded text-xs">M</kbd> - Toggle mute
+                    </p>
+                    <p className={isDarkMode ? "text-gray-400" : "text-gray-600"}>
+                      <kbd className="px-1 py-0.5 bg-gray-600 text-white rounded text-xs">H</kbd> - Toggle help
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           </CardContent>

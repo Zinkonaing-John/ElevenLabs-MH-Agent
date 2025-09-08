@@ -14,8 +14,12 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "ElevenLabs Conversational AI Demo",
-  description: "A demo of ElevenLabs Conversational AI",
+  title: "AI Voice Chat - Mental Health Assistant",
+  description: "A robust and user-friendly AI voice chat application for mental health support, powered by ElevenLabs and built with Next.js",
+  keywords: ["AI", "voice chat", "mental health", "ElevenLabs", "conversational AI"],
+  authors: [{ name: "Pioneer Team" }],
+  viewport: "width=device-width, initial-scale=1",
+  robots: "index, follow",
 };
 
 export default function RootLayout({

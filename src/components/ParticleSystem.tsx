@@ -175,6 +175,8 @@ export default function ParticleSystem({
           alpha: true,
           powerPreference: "high-performance",
         }}
+        dpr={[1, 2]} // Responsive pixel ratio
+        performance={{ min: 0.5 }} // Performance optimization
       >
         <Scene />
       </Canvas>
