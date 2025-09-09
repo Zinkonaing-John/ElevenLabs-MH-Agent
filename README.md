@@ -23,10 +23,11 @@ This project demonstrates how to build a real-time voice assistant using Next.js
    Create a `.env.local` file in the root directory:
 
    ```bash
-   cp example.env.local .env.local
+   # Create the file manually or copy from example
+   touch .env.local
    ```
 
-   Edit `.env.local` and replace `xxx` with your actual ElevenLabs Agent ID:
+   Add the following content to `.env.local` and replace `xxx` with your actual ElevenLabs Agent ID:
 
    ```env
    NEXT_PUBLIC_ELEVENLABS_AGENT_ID=your_actual_agent_id_here
@@ -34,9 +35,10 @@ This project demonstrates how to build a real-time voice assistant using Next.js
 
    **To get your Agent ID:**
 
-   - Go to [ElevenLabs Agents](https://elevenlabs.io/app/agents)
+   - Go to [ElevenLabs Conversational AI](https://elevenlabs.io/app/conversational-ai)
    - Create a new agent or select an existing one
    - Copy the Agent ID from the agent's settings
+   - The Agent ID should be a long string of characters (not "xxx")
 
 3. **Run the development server:**
 
@@ -69,6 +71,14 @@ This project demonstrates how to build a real-time voice assistant using Next.js
 - Verify your Agent ID is valid
 - Check your internet connection
 - Ensure your ElevenLabs account has sufficient credits
+
+**"Error starting conversation: {}" (Empty error object)**
+
+- This usually indicates a configuration issue
+- Check that your `.env.local` file exists and contains the correct Agent ID
+- Ensure the Agent ID is not set to "xxx" or empty
+- Restart your development server after making changes
+- Check the browser console for more detailed error information
 
 ## Features
 

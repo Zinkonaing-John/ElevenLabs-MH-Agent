@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 
@@ -18,8 +18,12 @@ export const metadata: Metadata = {
   description: "A robust and user-friendly AI voice chat application for mental health support, powered by ElevenLabs and built with Next.js",
   keywords: ["AI", "voice chat", "mental health", "ElevenLabs", "conversational AI"],
   authors: [{ name: "Pioneer Team" }],
-  viewport: "width=device-width, initial-scale=1",
   robots: "index, follow",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({

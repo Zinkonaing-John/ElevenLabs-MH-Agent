@@ -58,6 +58,19 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
     return agentId && agentId !== "xxx";
   };
 
+  // Debug function to help troubleshoot configuration issues
+  const debugConfiguration = () => {
+    const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
+    console.log("=== ElevenLabs Configuration Debug ===");
+    console.log("Agent ID:", agentId);
+    console.log("Has Agent ID:", !!agentId);
+    console.log("Agent ID Length:", agentId?.length || 0);
+    console.log("Is Default Value:", agentId === "xxx");
+    console.log("Is Configured:", isElevenLabsConfigured());
+    console.log("Environment:", process.env.NODE_ENV);
+    console.log("=====================================");
+  };
+
   const conversation = useConversation({
     onConnect: () => {
       console.log("Connected to ElevenLabs");
@@ -198,6 +211,11 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
 
   const handleStartConversation = async () => {
     try {
+      console.log("=== Starting conversation ===");
+      console.log("Agent ID:", process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID);
+      console.log("Status:", status);
+      console.log("Has Permission:", hasPermission);
+      
       setIsLoading(true);
       setErrorMessage("");
       playSound('start');
@@ -221,13 +239,79 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
       });
       console.log("Started conversation:", conversationId);
     } catch (error) {
-      const errorMsg =
-        error instanceof Error ? error.message : "Failed to start conversation";
+      // Enhanced error logging for debugging
+      console.error("Error starting conversation:");
+      console.error("Raw error object:", error);
+      console.error("Error type:", typeof error);
+      console.error("Error constructor:", error?.constructor?.name || 'Unknown');
+      console.error("Error string:", String(error));
+      console.error("Error keys:", error && typeof error === 'object' ? Object.keys(error) : []);
+      
+      // Handle completely empty or undefined errors
+      if (!error) {
+        console.error("ERROR: Caught error is null, undefined, or empty!");
+      }
+      
+      // Try to extract error message
+      let errorMessage = "Unknown error";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        console.error("Error message:", error.message);
+        console.error("Error stack:", error.stack);
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+        console.error("String error:", error);
+      } else if (error && typeof error === 'object') {
+        console.error("Object error properties:");
+        for (const [key, value] of Object.entries(error)) {
+          console.error(`  ${key}:`, value);
+        }
+        
+        // Try to extract meaningful error information
+        const errorObj = error as any;
+        if (errorObj.message) {
+          errorMessage = errorObj.message;
+        } else if (errorObj.error) {
+          errorMessage = errorObj.error;
+        } else if (errorObj.reason) {
+          errorMessage = errorObj.reason;
+        } else if (errorObj.description) {
+          errorMessage = errorObj.description;
+        } else if (errorObj.details) {
+          errorMessage = errorObj.details;
+        } else {
+          errorMessage = "An unknown error occurred. Check console for details.";
+        }
+      }
+      
+      // Additional debugging info
+      console.error("=== Configuration Debug ===");
+      console.error("Agent ID:", process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID);
+      console.error("Has Agent ID:", !!process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID);
+      console.error("Agent ID Length:", process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID?.length || 0);
+      console.error("Is Default Value:", process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID === 'xxx');
+      console.error("Current Status:", status);
+      console.error("Has Permission:", hasPermission);
+      console.error("==========================");
+
+      // Use the error message we extracted above
+      let errorMsg = errorMessage;
+
+      // Add specific guidance based on error type
+      if (errorMsg.includes('Agent ID') || errorMsg.includes('configuration')) {
+        errorMsg += "\n\nPlease check your .env.local file and ensure NEXT_PUBLIC_ELEVENLABS_AGENT_ID is set correctly.";
+      } else if (errorMsg.includes('permission') || errorMsg.includes('microphone')) {
+        errorMsg += "\n\nPlease allow microphone access in your browser.";
+      } else if (errorMsg.includes('network') || errorMsg.includes('connection')) {
+        errorMsg += "\n\nPlease check your internet connection and try again.";
+      } else if (errorMsg === "Unknown error" || errorMsg === "An unknown error occurred. Check console for details.") {
+        errorMsg += "\n\nThis might be a configuration issue. Please:\n1. Check your .env.local file\n2. Ensure your Agent ID is correct\n3. Restart your development server\n4. Check the console for detailed error information";
+      }
+
       setErrorMessage(errorMsg);
       setIsLoading(false);
       playSound('error');
       triggerHaptic('heavy');
-      console.error("Error starting conversation:", error);
     }
   };
 
@@ -369,6 +453,20 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
               </div>
             </div>
             <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={debugConfiguration}
+                className={`${
+                  isDarkMode
+                    ? "hover:bg-gray-800 hover:border-gray-600 text-gray-400 border-gray-700"
+                    : "hover:bg-gray-100 hover:border-gray-400 text-gray-600 border-gray-300"
+                }`}
+                aria-label="Debug configuration"
+                title="Debug configuration (check console)"
+              >
+                <AlertCircle className="h-4 w-4" />
+              </Button>
               <Button
                 variant="outline"
                 size="icon"
