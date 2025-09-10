@@ -354,7 +354,17 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
 
   const togglePause = async () => {
     try {
-      await conversation.toggleAudio();
+      // Since toggleAudio doesn't exist, we'll implement pause by stopping/starting the session
+      if (isPaused) {
+        // Resume by restarting the session
+        const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
+        if (agentId && agentId !== "xxx") {
+          await conversation.startSession({ agentId });
+        }
+      } else {
+        // Pause by ending the session
+        await conversation.endSession();
+      }
       setIsPaused(!isPaused);
       triggerHaptic('light');
     } catch (error) {
