@@ -20,6 +20,7 @@ import {
   HelpCircle,
   Phone,
   RefreshCw,
+  Pause,
 } from "lucide-react";
 
 interface StatusConfig {
@@ -36,6 +37,7 @@ interface VoiceChatProps {
 const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
   const [hasPermission, setHasPermission] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [permissionRequested, setPermissionRequested] = useState(false);
@@ -79,11 +81,13 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
       setIsRetrying(false);
       setRetryCount(0);
       setSessionStartTime(new Date());
+      setIsPaused(false);
     },
     onDisconnect: () => {
       console.log("Disconnected from ElevenLabs");
       setIsLoading(false);
       setSessionStartTime(null);
+      setIsPaused(false);
     },
     onMessage: (message) => {
       console.log("Received message:", message);
@@ -348,6 +352,21 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
     }
   };
 
+  const togglePause = async () => {
+    try {
+      await conversation.toggleAudio();
+      setIsPaused(!isPaused);
+      triggerHaptic('light');
+    } catch (error) {
+      const errorMsg =
+        error instanceof Error ? error.message : "Failed to toggle audio";
+      setErrorMessage(errorMsg);
+      playSound('error');
+      triggerHaptic('heavy');
+      console.error("Error toggling audio:", error);
+    }
+  };
+
   const retryPermission = () => {
     setPermissionRequested(false);
     setErrorMessage("");
@@ -512,6 +531,25 @@ const VoiceChat = ({ isDarkMode }: VoiceChatProps) => {
                   <VolumeX className="h-4 w-4" />
                 ) : (
                   <Volume2 className="h-4 w-4" />
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={togglePause}
+                disabled={status !== "connected" || !isSpeaking}
+                className={`${
+                  isDarkMode
+                    ? "hover:bg-gray-800 hover:border-gray-600 text-gray-400 border-gray-700"
+                    : "hover:bg-gray-100 hover:border-gray-400 text-gray-600 border-gray-300"
+                }`}
+                aria-label={isPaused ? "Resume audio" : "Pause audio"}
+                title={isPaused ? "Resume audio" : "Pause audio"}
+              >
+                {isPaused ? (
+                  <Mic className="h-4 w-4" />
+                ) : (
+                  <Pause className="h-4 w-4" />
                 )}
               </Button>
             </div>
